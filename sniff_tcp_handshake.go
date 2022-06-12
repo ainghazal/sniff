@@ -4,17 +4,22 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log"
 	"net"
 	"os"
+	"os/signal"
 	"sort"
+	"syscall"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	_ "github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
 )
 
 const (
+	// The same default as tcpdump.
+	defaultSnapLen = 262144
+
 	NULL = iota
 	SYN
 )
@@ -27,29 +32,95 @@ var (
 
 func main() {
 	displayGood := flag.Bool("g", false, "display good tcp handshakes")
+	list := flag.Bool("list", false, "list capture devices")
 	pcapFile := flag.String("pcap", "", "pcap file to analyze")
+	pcapIface := flag.String("iface", "", "interface to listen on")
+	pcapPort := flag.String("port", "", "port to use in capture filter")
 	flag.Parse()
 
-	if !checkFileExists(*pcapFile) {
-		fmt.Println("no such file")
-		os.Exit(1)
+	if *list {
+		// Find all devices
+		devices, err := pcap.FindAllDevs()
+		if err != nil {
+			log.Fatal(err)
+		}
+		// Print device information
+		fmt.Println("Devices found:")
+		for _, device := range devices {
+			fmt.Println("\nName: ", device.Name)
+			fmt.Println("Description: ", device.Description)
+			fmt.Println("Devices addresses: ", device.Description)
+			for _, address := range device.Addresses {
+				fmt.Println("- IP address: ", address.IP)
+				fmt.Println("- Subnet mask: ", address.Netmask)
+			}
+		}
+		return
 	}
 
-	handle, err := pcap.OpenOffline(*pcapFile)
-	if err != nil {
-		panic(err)
-	}
-	defer handle.Close()
+	//var handle *pcap.Handle
+	var packets chan gopacket.Packet
 
-	packets := gopacket.NewPacketSource(
-		handle, handle.LinkType()).Packets()
+	if *pcapFile != "" {
+		if !checkFileExists(*pcapFile) {
+			fmt.Println("no such file")
+			os.Exit(1)
+		}
+		handle, err := pcap.OpenOffline(*pcapFile)
+		if err != nil {
+			panic(err)
+		}
+		defer handle.Close()
+		packets = gopacket.NewPacketSource(
+			handle,
+			handle.LinkType()).Packets()
+	} else {
+		if *pcapIface == "" {
+			fmt.Println("specify a pcap file or interface")
+			os.Exit(1)
+		}
+		handle, err := pcap.OpenLive(
+			*pcapIface,
+			defaultSnapLen,
+			true,
+			pcap.BlockForever)
+		if err != nil {
+			panic(err)
+		}
+		defer handle.Close()
+
+		if *pcapPort != "" {
+			if err := handle.SetBPFFilter("port " + *pcapPort); err != nil {
+				panic(err)
+			}
+		}
+		sigs := make(chan os.Signal, 1)
+		signal.Notify(sigs, syscall.SIGUSR1)
+
+		go func() {
+			for {
+				<-sigs
+				printSummary(*displayGood)
+			}
+		}()
+
+		packets = gopacket.NewPacketSource(
+			handle,
+			layers.LinkTypeEthernet).Packets()
+	}
+
 	for pkt := range packets {
 		analyzePacket(pkt)
 	}
+
 	printSummary(*displayGood)
+
 }
 
 func analyzePacket(pkt gopacket.Packet) {
+
+	// log.Println("analyze", pkt)
+
 	networkLayer := pkt.NetworkLayer()
 	if networkLayer == nil {
 		return
