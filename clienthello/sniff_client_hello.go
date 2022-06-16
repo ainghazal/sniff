@@ -16,7 +16,7 @@ import (
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
 
-	dissector "github.com/go-gost/tls-dissector"
+	dissector "github.com/ainghazal/tls-dissector"
 )
 
 var (
