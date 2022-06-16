@@ -9,11 +9,14 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
+
+	dissector "github.com/go-gost/tls-dissector"
 )
 
 var (
@@ -21,6 +24,7 @@ var (
 	offsetMin    = 14
 	offsetMax    = 17
 	clientHellos int
+	doText       bool
 )
 
 // The same default as tcpdump.
@@ -31,7 +35,10 @@ func main() {
 	pcapFile := flag.String("pcap", "", "pcap file to analyze")
 	pcapIface := flag.String("iface", "", "interface to listen on")
 	pcapPort := flag.String("port", "", "port to use in capture filter")
+	text := flag.Bool("text", false, "text output for the TLS record")
 	flag.Parse()
+
+	doText = *text
 
 	if *list {
 		// Find all devices
@@ -120,10 +127,71 @@ func analyzePacket(packet gopacket.Packet) {
 		}
 
 		if bytes.Equal(payload[offsetMin:offsetMax], magic) {
-			fmt.Println(hex.Dump(payload[offsetMin:]))
+			rawHello := payload[offsetMin:]
+			fmt.Println(hex.Dump(rawHello))
+			if doText {
+				parseTLSRecord(rawHello)
+			}
 			clientHellos += 1
 		}
 	}
+}
+
+func parseTLSRecord(b []byte) {
+	ch := &dissector.ClientHelloMsg{}
+	err := ch.Decode(b[5:])
+	if err != nil {
+		log.Println("error:", err)
+	}
+	fmt.Println("Client Hello")
+	fmt.Println("  Version:      ", parseVersion(ch.Version))
+	fmt.Println("  Random:       ", parseRandom(ch.Random))
+	fmt.Println("  SessionID:    ", parseSessionID(ch.SessionID))
+	fmt.Println("  Ciphersuites: ", parseCiphersuites(ch.CipherSuites))
+	for _, cs := range ch.CipherSuites {
+		fmt.Printf("\t\t\t%x\n", cs)
+	}
+	fmt.Println("  Compression:  ", parseCompression(ch.CompressionMethods))
+	fmt.Println("  Extensions:")
+	for _, ext := range ch.Extensions {
+		fmt.Printf("\t\t\t%v\n", ext)
+	}
+}
+
+func parseVersion(value dissector.Version) string {
+	switch value {
+	case 0x303:
+		return "TLS 1.2"
+	case 0x304:
+		return "TLS 1.3"
+	default:
+		return "unknown"
+	}
+}
+
+func parseRandom(value dissector.Random) string {
+	time := strconv.Itoa(int(value.Time))
+	random := hex.EncodeToString(value.Opaque[:])
+	return fmt.Sprintf("%s:%s", time, random)
+}
+
+func parseSessionID(value []byte) string {
+	return hex.EncodeToString(value)
+}
+
+func parseCiphersuites(value []uint16) string {
+	return fmt.Sprintf("(%d suites)", len(value))
+}
+
+func parseCompression(value []uint8) string {
+	if len(value) == 1 && value[0] == 0 {
+		return "null"
+	}
+	m := ""
+	for _, cm := range value {
+		m = m + strconv.Itoa(int(cm)) + ","
+	}
+	return m
 }
 
 func printSummary() {
