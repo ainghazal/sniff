@@ -129,6 +129,7 @@ func analyzePacket(packet gopacket.Packet) {
 					// -- this is likely to be true for all the first connections.
 					rawHello := payload[i:]
 					fmt.Println(hex.Dump(rawHello))
+					fmt.Printf("\nraw:\n\n%s\n\n", hex.EncodeToString(rawHello))
 					if doText {
 						parseTLSRecord(rawHello)
 					}
