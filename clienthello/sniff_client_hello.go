@@ -150,9 +150,9 @@ func parseTLSRecord(b []byte) {
 	fmt.Println("  Version:      ", parseVersion(ch.Version))
 	fmt.Println("  Random:       ", parseRandom(ch.Random))
 	fmt.Println("  SessionID:    ", parseSessionID(ch.SessionID))
-	fmt.Println("  Ciphersuites: ", parseCiphersuites(ch.CipherSuites))
+	fmt.Println("  Cipher Suites: ", parseCiphersuites(ch.CipherSuites))
 	for _, cs := range ch.CipherSuites {
-		fmt.Printf("\t\t\t%x\n", cs)
+		fmt.Printf("\t\t\t%s (%x)\n", getCiphersuiteName(cs), cs)
 	}
 	fmt.Println("  Compression:  ", parseCompression(ch.CompressionMethods))
 	fmt.Println("  Extensions:")
@@ -196,6 +196,14 @@ func parseCompression(value []uint8) string {
 		m = m + strconv.Itoa(int(cm)) + ","
 	}
 	return m
+}
+
+func getCiphersuiteName(cs uint16) string {
+	name := dissector.Suites[cs]
+	if name == "" {
+		name = "???"
+	}
+	return name
 }
 
 func printSummary() {
