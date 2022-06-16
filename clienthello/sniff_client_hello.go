@@ -21,8 +21,6 @@ import (
 
 var (
 	magic        = []byte{0x16, 0x03, 0x01}
-	offsetMin    = 14
-	offsetMax    = 17
 	clientHellos int
 	doText       bool
 )
@@ -122,17 +120,22 @@ func analyzePacket(packet gopacket.Packet) {
 
 	if app := packet.ApplicationLayer(); app != nil {
 		payload := app.Payload()
-		if len(payload) < offsetMax {
-			return
-		}
 
-		if bytes.Equal(payload[offsetMin:offsetMax], magic) {
-			rawHello := payload[offsetMin:]
-			fmt.Println(hex.Dump(rawHello))
-			if doText {
-				parseTLSRecord(rawHello)
+		if bytes.Contains(payload, magic) {
+			for i, _ := range payload {
+				if bytes.Equal(magic, payload[i:i+3]) {
+					// can verify that at a fixed offset (-20?)
+					// should find a ~0x20 byte (opcode[P_CONTROL_V1]/keyid=0)
+					// -- this is likely to be true for all the first connections.
+					rawHello := payload[i:]
+					fmt.Println(hex.Dump(rawHello))
+					if doText {
+						parseTLSRecord(rawHello)
+					}
+					clientHellos += 1
+					return
+				}
 			}
-			clientHellos += 1
 		}
 	}
 }
@@ -187,6 +190,7 @@ func parseCompression(value []uint8) string {
 	if len(value) == 1 && value[0] == 0 {
 		return "null"
 	}
+	// is there really someone out there setting compression nowadays??
 	m := ""
 	for _, cm := range value {
 		m = m + strconv.Itoa(int(cm)) + ","
